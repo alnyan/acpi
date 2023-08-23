@@ -563,7 +563,7 @@ where
      * the operation region that aren't used for anything.
      */
     let reserved_field =
-        opcode(opcode::RESERVED_FIELD).then(pkg_length()).map(|((), length)| Ok(length.raw_length as u64));
+        opcode(opcode::RESERVED_FIELD).then(raw_pkg_length()).map(|((), length)| Ok(length as u64));
 
     // TODO: work out what to do with an access field
     // let access_field = opcode(opcode::ACCESS_FIELD)
@@ -571,22 +571,17 @@ where
     //     .then(take())
     //     .map_with_context(|(((), access_type), access_attrib), context| (Ok(    , context));
 
-    let named_field = name_seg().then(pkg_length()).map_with_context(move |(name_seg, length), context| {
+    let named_field = name_seg().then(raw_pkg_length()).map_with_context(move |(name_seg, length), context| {
         try_with_context!(
             context,
             context.namespace.add_value_at_resolved_path(
                 AmlName::from_name_seg(name_seg),
                 &context.current_scope,
-                AmlValue::Field {
-                    region: region_handle,
-                    flags,
-                    offset: current_offset,
-                    length: length.raw_length as u64,
-                },
+                AmlValue::Field { region: region_handle, flags, offset: current_offset, length: length as u64 },
             )
         );
 
-        (Ok(length.raw_length as u64), context)
+        (Ok(length as u64), context)
     });
 
     choice!(reserved_field, named_field)
@@ -898,7 +893,7 @@ where
     let reserved_field =
         opcode(opcode::RESERVED_FIELD).then(raw_pkg_length()).map(|((), length)| Ok(length as u64));
 
-    let named_field = name_seg().then(pkg_length()).map_with_context(move |(name_seg, length), context| {
+    let named_field = name_seg().then(raw_pkg_length()).map_with_context(move |(name_seg, length), context| {
         try_with_context!(
             context,
             context.namespace.add_value_at_resolved_path(
@@ -909,12 +904,12 @@ where
                     data: data_handle,
                     flags,
                     offset: current_offset,
-                    length: length.raw_length as u64,
+                    length: length as u64,
                 }
             )
         );
 
-        (Ok(length.raw_length as u64), context)
+        (Ok(length as u64), context)
     });
 
     choice!(reserved_field, named_field)
