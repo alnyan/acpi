@@ -60,7 +60,7 @@ pub mod value;
 
 pub use crate::{namespace::*, value::AmlValue};
 
-use alloc::{boxed::Box, string::ToString};
+use alloc::{boxed::Box, collections::BTreeMap, string::ToString};
 use core::mem;
 use log::{error, warn};
 use misc::{ArgNum, LocalNum};
@@ -290,6 +290,16 @@ impl AmlContext {
         Ok(())
     }
 
+    pub(crate) fn acquire_mutex(&self, _target: Target, _timeout: u16) -> Result<bool, AmlError> {
+        // TODO actual mutex impl
+        Ok(true)
+    }
+
+    pub(crate) fn release_mutex(&self, _target: Target) -> Result<(), AmlError> {
+        // TODO actual mutex impl
+        Ok(())
+    }
+
     pub(crate) fn read_target(&self, target: &Target) -> Result<&AmlValue, AmlError> {
         match target {
             Target::Null => todo!(),
@@ -478,13 +488,19 @@ impl AmlContext {
                 }
             }
 
+            RegionSpace::EmbeddedControl => {
+                let address = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
+                assert_eq!(length, 8);
+                Ok(self.handler.read_ec_u8(address) as u64)
+            }
+
             // TODO
             _ => unimplemented!(),
         }
     }
 
     pub(crate) fn write_region(
-        &mut self,
+        &self,
         region_handle: AmlHandle,
         offset: u64,
         length: u64,
@@ -677,10 +693,10 @@ pub trait Handler: Send + Sync {
     fn read_u32(&self, address: usize) -> u32;
     fn read_u64(&self, address: usize) -> u64;
 
-    fn write_u8(&mut self, address: usize, value: u8);
-    fn write_u16(&mut self, address: usize, value: u16);
-    fn write_u32(&mut self, address: usize, value: u32);
-    fn write_u64(&mut self, address: usize, value: u64);
+    fn write_u8(&self, address: usize, value: u8);
+    fn write_u16(&self, address: usize, value: u16);
+    fn write_u32(&self, address: usize, value: u32);
+    fn write_u64(&self, address: usize, value: u64);
 
     fn read_io_u8(&self, port: u16) -> u8;
     fn read_io_u16(&self, port: u16) -> u16;
@@ -697,6 +713,9 @@ pub trait Handler: Send + Sync {
     fn write_pci_u8(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16, value: u8);
     fn write_pci_u16(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16, value: u16);
     fn write_pci_u32(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16, value: u32);
+
+    fn write_ec_u8(&self, address: u64, value: u8);
+    fn read_ec_u8(&self, address: u64) -> u8;
 
     fn handle_fatal_error(&self, fatal_type: u8, fatal_code: u32, fatal_arg: u64) {
         panic!("Fatal error while executing AML (encountered DefFatal op). fatal_type = {:?}, fatal_code = {:?}, fatal_arg = {:?}", fatal_type, fatal_code, fatal_arg);

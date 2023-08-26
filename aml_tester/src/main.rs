@@ -252,16 +252,16 @@ impl aml::Handler for Handler {
         0
     }
 
-    fn write_u8(&mut self, address: usize, value: u8) {
+    fn write_u8(&self, address: usize, value: u8) {
         println!("write_u8 {address:#x}<-{value:#x}");
     }
-    fn write_u16(&mut self, address: usize, value: u16) {
+    fn write_u16(&self, address: usize, value: u16) {
         println!("write_u16 {address:#x}<-{value:#x}");
     }
-    fn write_u32(&mut self, address: usize, value: u32) {
+    fn write_u32(&self, address: usize, value: u32) {
         println!("write_u32 {address:#x}<-{value:#x}");
     }
-    fn write_u64(&mut self, address: usize, value: u64) {
+    fn write_u64(&self, address: usize, value: u64) {
         println!("write_u64 {address:#x}<-{value:#x}");
     }
 
@@ -309,5 +309,14 @@ impl aml::Handler for Handler {
     }
     fn write_pci_u32(&self, segment: u16, bus: u8, device: u8, function: u8, _offset: u16, value: u32) {
         println!("write_pci_u32 ({segment:#x}, {bus:#x}, {device:#x}, {function:#x})<-{value:#x}");
+    }
+
+    fn read_ec_u8(&self, address: u64) -> u8 {
+        println!("read_ec_u8 {address:#x}");
+        0
+    }
+
+    fn write_ec_u8(&self, address: u64, value: u8) {
+        todo!()
     }
 }

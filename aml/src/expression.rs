@@ -1,8 +1,18 @@
 use crate::{
     misc::debug_obj,
     name_object::{name_string, simple_name, super_name, target},
-    opcode::{self, opcode},
-    parser::{choice, comment_scope, n_of, take, take_to_end_of_pkglength, try_with_context, Parser, Propagate},
+    opcode::{self, ext_opcode, opcode},
+    parser::{
+        choice,
+        comment_scope,
+        n_of,
+        take,
+        take_to_end_of_pkglength,
+        take_u16,
+        try_with_context,
+        Parser,
+        Propagate,
+    },
     pkg_length::pkg_length,
     term_object::{data_ref_object, def_cond_ref_of, term_arg},
     value::{AmlType, AmlValue, Args},
@@ -60,6 +70,7 @@ where
             def_to_integer(),
             def_cond_ref_of(),
             def_size_of(),
+            def_acquire(),
             method_invocation() // XXX: this must always appear last. See how we have to parse it to see why.
         ),
     )
@@ -321,8 +332,8 @@ where
             DebugVerbosity::AllScopes,
             "DefLOr",
             term_arg().then(term_arg()).map_with_context(|(left_arg, right_arg), context| {
-                let left = try_with_context!(context, left_arg.as_bool());
-                let right = try_with_context!(context, right_arg.as_bool());
+                let left = try_with_context!(context, left_arg.as_bool(context));
+                let right = try_with_context!(context, right_arg.as_bool(context));
                 (Ok(AmlValue::Boolean(left && right)), context)
             }),
         ))
@@ -342,8 +353,8 @@ where
             DebugVerbosity::AllScopes,
             "DefLOr",
             term_arg().then(term_arg()).map_with_context(|(left_arg, right_arg), context| {
-                let left = try_with_context!(context, left_arg.as_bool());
-                let right = try_with_context!(context, right_arg.as_bool());
+                let left = try_with_context!(context, left_arg.as_bool(context));
+                let right = try_with_context!(context, right_arg.as_bool(context));
                 (Ok(AmlValue::Boolean(left || right)), context)
             }),
         ))
@@ -782,6 +793,25 @@ where
             }),
         ))
         .map(|((), value)| Ok(value))
+}
+
+fn def_acquire<'a, 'c>() -> impl Parser<'a, 'c, AmlValue>
+where
+    'c: 'a,
+{
+    /*
+     *  DefAcquire := AcquireOp MutexObject Timeout
+     *  AcquireOp := ExtOpPrefix 0x23
+     *  Timeout := WordData
+     *  MutexObject := SuperName
+     */
+
+    ext_opcode(opcode::EXT_DEF_ACQUIRE_OP)
+        .then(comment_scope(DebugVerbosity::AllScopes, "DefAcquire", super_name().then(take_u16())))
+        .map_with_context(|(_, (mutex, timeout)), context| {
+            let success = try_with_context!(context, context.acquire_mutex(mutex, timeout));
+            (Ok(AmlValue::Boolean(success)), context)
+        })
 }
 
 fn method_invocation<'a, 'c>() -> impl Parser<'a, 'c, AmlValue>

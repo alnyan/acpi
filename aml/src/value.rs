@@ -287,10 +287,12 @@ impl AmlValue {
         }
     }
 
-    pub fn as_bool(&self) -> Result<bool, AmlError> {
+    pub fn as_bool(&self, context: &AmlContext) -> Result<bool, AmlError> {
         match self {
             AmlValue::Boolean(value) => Ok(*value),
             AmlValue::Integer(value) => Ok(*value != 0),
+            AmlValue::Field { .. } => self.read_field(context)?.as_bool(context),
+            AmlValue::IndexField { .. } => self.read_index_field(context)?.as_bool(context),
             _ => Err(AmlError::IncompatibleValueConversion { current: self.type_of(), target: AmlType::Integer }),
         }
     }
@@ -480,7 +482,7 @@ impl AmlValue {
     }
 
     /// Reads from an IndexField, returning either an `Integer`
-    pub fn read_index_field(&self, context: &mut AmlContext) -> Result<AmlValue, AmlError> {
+    pub fn read_index_field(&self, context: &AmlContext) -> Result<AmlValue, AmlError> {
         let AmlValue::IndexField { index, data, flags, offset, length } = self else {
             return Err(AmlError::IncompatibleValueConversion {
                 current: self.type_of(),
@@ -488,8 +490,8 @@ impl AmlValue {
             });
         };
 
-        let mut index_field = context.namespace.get_mut(*index)?.clone();
-        let data_field = context.namespace.get_mut(*data)?.clone();
+        let mut index_field = context.namespace.get(*index)?.clone();
+        let data_field = context.namespace.get(*data)?.clone();
 
         // TODO buffer field accesses
         let mut value = 0u64;
@@ -511,7 +513,7 @@ impl AmlValue {
         Ok(AmlValue::Integer(value))
     }
 
-    pub fn write_index_field(&self, value: AmlValue, context: &mut AmlContext) -> Result<(), AmlError> {
+    pub fn write_index_field(&self, value: AmlValue, context: &AmlContext) -> Result<(), AmlError> {
         let AmlValue::IndexField { index, data, flags, offset, length } = self else {
             return Err(AmlError::IncompatibleValueConversion {
                 current: self.type_of(),
@@ -519,8 +521,8 @@ impl AmlValue {
             });
         };
 
-        let mut index_field = context.namespace.get_mut(*index)?.clone();
-        let mut data_field = context.namespace.get_mut(*data)?.clone();
+        let mut index_field = context.namespace.get(*index)?.clone();
+        let mut data_field = context.namespace.get(*data)?.clone();
 
         let value = value.as_integer(context)?;
 
@@ -551,6 +553,7 @@ impl AmlValue {
                     match region {
                         RegionSpace::SystemMemory => 64,
                         RegionSpace::SystemIo | RegionSpace::PciConfig => 32,
+                        RegionSpace::EmbeddedControl => 8,
                         _ => unimplemented!(),
                     }
                 } else {
@@ -586,7 +589,7 @@ impl AmlValue {
         }
     }
 
-    pub fn write_field(&mut self, value: AmlValue, context: &mut AmlContext) -> Result<(), AmlError> {
+    pub fn write_field(&mut self, value: AmlValue, context: &AmlContext) -> Result<(), AmlError> {
         /*
          * If the field's update rule is `Preserve`, we need to read the initial value of the field, so we can
          * overwrite the correct bits. We destructure the field to do the actual write, so we read from it if

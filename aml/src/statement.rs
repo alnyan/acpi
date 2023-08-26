@@ -1,4 +1,5 @@
 use crate::{
+    name_object::super_name,
     opcode::{self, ext_opcode, opcode},
     parser::{
         choice,
@@ -39,6 +40,7 @@ where
             def_if_else(),
             def_noop(),
             def_return(),
+            def_release(),
             def_while()
         ),
     )
@@ -139,8 +141,10 @@ where
             pkg_length()
                 .then(term_arg())
                 .feed(|(length, predicate_arg)| {
-                    take_to_end_of_pkglength(length)
-                        .map(move |then_branch| Ok((predicate_arg.as_bool()?, then_branch)))
+                    take_to_end_of_pkglength(length).map_with_context(move |then_branch, context| {
+                        let predicate_arg = try_with_context!(context, predicate_arg.as_bool(context));
+                        (Ok((predicate_arg, then_branch)), context)
+                    })
                 })
                 .then(choice!(
                     maybe_else_opcode
@@ -232,7 +236,7 @@ where
                         .map(move |body| Ok((first_predicate.clone(), predicate_stream, body)))
                 })
                 .map_with_context(|(first_predicate, predicate_stream, body), mut context| {
-                    if !try_with_context!(context, first_predicate.as_bool()) {
+                    if !try_with_context!(context, first_predicate.as_bool(context)) {
                         return (Ok(()), context);
                     }
 
@@ -263,7 +267,7 @@ where
                             {
                                 Ok((_, new_context, result)) => {
                                     context = new_context;
-                                    try_with_context!(context, result.as_bool())
+                                    try_with_context!(context, result.as_bool(context))
                                 }
                                 Err((_, context, err)) => return (Err(err), context),
                             };
@@ -277,4 +281,22 @@ where
                 }),
         ))
         .discard_result()
+}
+
+fn def_release<'a, 'c>() -> impl Parser<'a, 'c, ()>
+where
+    'c: 'a,
+{
+    /*
+     *  DefRelease := ReleaseOp MutexObject
+     *  ReleaseOp := ExtOpPrefix 0x27
+     *  MutexObject := SuperName
+     */
+
+    ext_opcode(opcode::EXT_DEF_RELEASE_OP)
+        .then(comment_scope(DebugVerbosity::AllScopes, "DefRelease", super_name()))
+        .map_with_context(|(_, mutex), context| {
+            try_with_context!(context, context.release_mutex(mutex));
+            (Ok(()), context)
+        })
 }
