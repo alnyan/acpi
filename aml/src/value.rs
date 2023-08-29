@@ -569,20 +569,30 @@ impl AmlValue {
                 FieldAccessType::Buffer => 8, // TODO
             };
 
-            /*
-             * Find the access size, as either the minimum access size allowed by the region, or the field length
-             * rounded up to the next power-of-2, whichever is larger.
-             */
-            let access_size = u64::max(minimum_access_size, length.next_power_of_two());
+            let field_size = length.next_power_of_two();
+            // /*
+            //  * Find the access size, as either the minimum access size allowed by the region, or the field length
+            //  * rounded up to the next power-of-2, whichever is larger.
+            //  */
+            // let access_size = u64::max(minimum_access_size, length.next_power_of_two());
 
-            /*
-             * TODO: we need to decide properly how to read from the region itself. Complications:
-             *    - if the region has a minimum access size greater than the desired length, we need to read the
-             *      minimum and mask it (reading a byte from a WordAcc region)
-             *    - if the desired length is larger than we can read, we need to do multiple reads
-             */
+            // TODO length of 64 or less is assumed
+
+            // /*
+            //  * TODO: we need to decide properly how to read from the region itself. Complications:
+            //  *    - if the region has a minimum access size greater than the desired length, we need to read the
+            //  *      minimum and mask it (reading a byte from a WordAcc region)
+            //  *    - if the desired length is larger than we can read, we need to do multiple reads
+            //  */
+            // Need to read multiple items
+            if *offset % 8 + *length > field_size {
+                todo!();
+            }
+
             Ok(AmlValue::Integer(
-                context.read_region(*region, *offset, access_size)?.get_bits(0..(*length as usize)),
+                context
+                    .read_region(*region, *offset, minimum_access_size, field_size)?
+                    .get_bits(0..(*length as usize)),
             ))
         } else {
             Err(AmlError::IncompatibleValueConversion { current: self.type_of(), target: AmlType::FieldUnit })
@@ -634,10 +644,11 @@ impl AmlValue {
              * Find the access size, as either the minimum access size allowed by the region, or the field length
              * rounded up to the next power-of-2, whichever is larger.
              */
-            let access_size = u64::max(minimum_access_size, length.next_power_of_two());
+            // let access_size = u64::max(minimum_access_size, length.next_power_of_two());
+            let field_size = length.next_power_of_two();
 
             field_value.set_bits(0..(*length as usize), value.as_integer(context)?);
-            context.write_region(*region, *offset, access_size, field_value)
+            context.write_region(*region, *offset, minimum_access_size, field_size, field_value)
         } else {
             Err(AmlError::IncompatibleValueConversion { current: self.type_of(), target: AmlType::FieldUnit })
         }

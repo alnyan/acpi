@@ -405,9 +405,73 @@ impl AmlContext {
         }
     }
 
+    fn bit_access<F: FnMut(&Self, u64, usize, usize, usize) -> Result<(), AmlError>>(
+        &self,
+        base_address: u64,
+        bit_offset: u64,
+        access_size: u64,
+        bit_length: u64,
+        mut access: F,
+    ) -> Result<(), AmlError> {
+        let mut field_bit_position = bit_offset as usize;
+        let mut value_bit_position = 0;
+        let mut rem = bit_length as usize;
+
+        while rem != 0 {
+            let aligned = field_bit_position as u64 / access_size;
+            let off = field_bit_position % (access_size as usize);
+            let lim = core::cmp::min(access_size as usize - off, rem);
+
+            let address = base_address + aligned;
+
+            access(self, address, off, value_bit_position, lim)?;
+
+            rem -= lim;
+            field_bit_position += lim;
+            value_bit_position += lim;
+        }
+
+        Ok(())
+    }
+
+    fn bit_access_mut<F: FnMut(&mut Self, u64, usize, usize, usize) -> Result<(), AmlError>>(
+        &mut self,
+        base_address: u64,
+        bit_offset: u64,
+        access_size: u64,
+        bit_length: u64,
+        mut access: F,
+    ) -> Result<(), AmlError> {
+        let mut field_bit_position = bit_offset as usize;
+        let mut value_bit_position = 0;
+        let mut rem = bit_length as usize;
+
+        while rem != 0 {
+            let aligned = field_bit_position as u64 / access_size;
+            let off = field_bit_position % (access_size as usize);
+            let lim = core::cmp::min(access_size as usize - off, rem);
+
+            let address = base_address + aligned;
+
+            access(self, address, off, value_bit_position, lim)?;
+
+            rem -= lim;
+            field_bit_position += lim;
+            value_bit_position += lim;
+        }
+
+        Ok(())
+    }
+
     /// Read from an operation-region, performing only standard-sized reads (supported powers-of-2 only. If a field
     /// is not one of these sizes, it may need to be masked, or multiple reads may need to be performed).
-    pub(crate) fn read_region(&self, region_handle: AmlHandle, offset: u64, length: u64) -> Result<u64, AmlError> {
+    pub(crate) fn read_region(
+        &self,
+        region_handle: AmlHandle,
+        bit_offset: u64,
+        access_size: u64,
+        length: u64,
+    ) -> Result<u64, AmlError> {
         use bit_field::BitField;
         use core::convert::TryInto;
         use value::RegionSpace;
@@ -424,27 +488,61 @@ impl AmlContext {
 
         match region_space {
             RegionSpace::SystemMemory => {
-                let address = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
-                match length {
-                    8 => Ok(self.handler.read_u8(address) as u64),
-                    16 => Ok(self.handler.read_u16(address) as u64),
-                    32 => Ok(self.handler.read_u32(address) as u64),
-                    64 => Ok(self.handler.read_u64(address)),
-                    _ => Err(AmlError::FieldInvalidAccessSize),
-                }
+                let mut result = 0;
+
+                self.bit_access(
+                    *region_base,
+                    bit_offset,
+                    access_size,
+                    length,
+                    |this, address, src_pos, dst_pos, count| {
+                        let address = address.try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
+
+                        let data = match access_size {
+                            8 => this.handler.read_u8(address) as u64,
+                            _ => todo!(),
+                        };
+
+                        result.set_bits(dst_pos..dst_pos + count, data.get_bits(src_pos..src_pos + count));
+
+                        Ok(())
+                    },
+                )?;
+
+                Ok(result)
             }
 
             RegionSpace::SystemIo => {
-                let port = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
-                match length {
-                    8 => Ok(self.handler.read_io_u8(port) as u64),
-                    16 => Ok(self.handler.read_io_u16(port) as u64),
-                    32 => Ok(self.handler.read_io_u32(port) as u64),
-                    _ => Err(AmlError::FieldInvalidAccessSize),
-                }
+                // TODO SystemIo ports might behave differently and it might be a better behavior
+                //      to just throw an error if the address + offset is misaligned?
+                let mut result = 0;
+
+                self.bit_access(
+                    *region_base,
+                    bit_offset,
+                    access_size,
+                    length,
+                    |this, address, src_pos, dst_pos, count| {
+                        let address = address.try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
+
+                        let data = match access_size {
+                            8 => this.handler.read_io_u8(address) as u32,
+                            16 => this.handler.read_io_u16(address) as u32,
+                            32 => this.handler.read_io_u32(address) as u32,
+                            _ => todo!(),
+                        };
+
+                        result.set_bits(dst_pos..dst_pos + count, data.get_bits(src_pos..src_pos + count));
+
+                        Ok(())
+                    },
+                )?;
+
+                Ok(result as u64)
             }
 
             RegionSpace::PciConfig => {
+                // TODO (WIP): Fix PciConfig addressing
                 /*
                  * First, we need to get some extra information out of objects in the parent object. Both
                  * `_SEG` and `_BBN` seem optional, with defaults that line up with legacy PCI implementations
@@ -478,7 +576,7 @@ impl AmlContext {
 
                 let device = adr.get_bits(16..24) as u8;
                 let function = adr.get_bits(0..8) as u8;
-                let offset = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
+                let offset = (region_base + bit_offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
 
                 match length {
                     8 => Ok(self.handler.read_pci_u8(seg, bbn, device, function, offset) as u64),
@@ -502,7 +600,8 @@ impl AmlContext {
     pub(crate) fn write_region(
         &self,
         region_handle: AmlHandle,
-        offset: u64,
+        bit_offset: u64,
+        access_size: u64,
         length: u64,
         value: u64,
     ) -> Result<(), AmlError> {
@@ -521,28 +620,74 @@ impl AmlContext {
         };
 
         match region_space {
-            RegionSpace::SystemMemory => {
-                let address = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
-                match length {
-                    8 => Ok(self.handler.write_u8(address, value as u8)),
-                    16 => Ok(self.handler.write_u16(address, value as u16)),
-                    32 => Ok(self.handler.write_u32(address, value as u32)),
-                    64 => Ok(self.handler.write_u64(address, value)),
-                    _ => Err(AmlError::FieldInvalidAccessSize),
-                }
-            }
+            RegionSpace::SystemMemory => self.bit_access_mut(
+                *region_base,
+                bit_offset,
+                access_size,
+                length,
+                |this, address, dst_pos, src_pos, count| {
+                    let address = address.try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
 
-            RegionSpace::SystemIo => {
-                let port = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
-                match length {
-                    8 => Ok(self.handler.write_io_u8(port, value as u8)),
-                    16 => Ok(self.handler.write_io_u16(port, value as u16)),
-                    32 => Ok(self.handler.write_io_u32(port, value as u32)),
-                    _ => Err(AmlError::FieldInvalidAccessSize),
-                }
-            }
+                    let data = if count as u64 == access_size {
+                        value.get_bits(src_pos..src_pos + count)
+                    } else {
+                        let mut data = match access_size {
+                            8 => this.handler.read_u8(address) as u64,
+                            16 => this.handler.read_u16(address) as u64,
+                            32 => this.handler.read_u32(address) as u64,
+                            64 => this.handler.read_u64(address),
+                            _ => unimplemented!(),
+                        };
+
+                        let bits = value.get_bits(src_pos..src_pos + count);
+                        data.set_bits(dst_pos..dst_pos + count, bits);
+
+                        data
+                    };
+
+                    match access_size {
+                        8 => this.handler.write_u8(address, data as u8),
+                        16 => this.handler.write_u16(address, data as u16),
+                        32 => this.handler.write_u32(address, data as u32),
+                        64 => this.handler.write_u64(address, data as u64),
+                        _ => unimplemented!(),
+                    }
+
+                    Ok(())
+                },
+            ),
+
+            RegionSpace::SystemIo => self.bit_access_mut(
+                *region_base,
+                bit_offset,
+                access_size,
+                length,
+                |this, address, dst_pos, src_pos, count| {
+                    let address = address.try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
+                    if count as u64 != access_size || dst_pos != 0 {
+                        /*
+                         * NOTE: reading from an I/O port is not the same as writing to it, so I
+                         *       don't think it is a good choice to read-modify-write these,
+                         *       instead just signal an error.
+                         */
+                        return Err(AmlError::MisalignedIoAccess { address, access_size });
+                    }
+
+                    let bits = value.get_bits(src_pos..src_pos + count);
+
+                    match access_size {
+                        8 => this.handler.write_io_u8(address, bits as u8),
+                        16 => this.handler.write_io_u16(address, bits as u16),
+                        32 => this.handler.write_io_u32(address, bits as u32),
+                        _ => unimplemented!(),
+                    }
+
+                    Ok(())
+                },
+            ),
 
             RegionSpace::PciConfig => {
+                // TODO (WIP): Fix PciConfig addressing
                 /*
                  * First, we need to get some extra information out of objects in the parent object. Both
                  * `_SEG` and `_BBN` seem optional, with defaults that line up with legacy PCI implementations
@@ -576,7 +721,7 @@ impl AmlContext {
 
                 let device = adr.get_bits(16..24) as u8;
                 let function = adr.get_bits(0..8) as u8;
-                let offset = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
+                let offset = (region_base + bit_offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
 
                 match length {
                     8 => Ok(self.handler.write_pci_u8(seg, bbn, device, function, offset, value as u8)),
@@ -820,6 +965,14 @@ pub enum AmlError {
     FieldInvalidAddress,
     FieldInvalidAccessSize,
     TypeCannotBeCompared(AmlType),
+    MisalignedMemoryAccess {
+        access_size: u64,
+        address: usize,
+    },
+    MisalignedIoAccess {
+        access_size: u64,
+        address: u16,
+    },
     /// Produced when the `Mid` operator is applied to a value of a type other than `Buffer` or `String`.
     TypeCannotBeSliced(AmlType),
     TypeCannotBeWrittenToBufferField(AmlType),
