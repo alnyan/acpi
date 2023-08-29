@@ -434,34 +434,34 @@ impl AmlContext {
         Ok(())
     }
 
-    fn bit_access_mut<F: FnMut(&mut Self, u64, usize, usize, usize) -> Result<(), AmlError>>(
-        &mut self,
-        base_address: u64,
-        bit_offset: u64,
-        access_size: u64,
-        bit_length: u64,
-        mut access: F,
-    ) -> Result<(), AmlError> {
-        let mut field_bit_position = bit_offset as usize;
-        let mut value_bit_position = 0;
-        let mut rem = bit_length as usize;
+    // fn bit_access_mut<F: FnMut(&mut Self, u64, usize, usize, usize) -> Result<(), AmlError>>(
+    //     &mut self,
+    //     base_address: u64,
+    //     bit_offset: u64,
+    //     access_size: u64,
+    //     bit_length: u64,
+    //     mut access: F,
+    // ) -> Result<(), AmlError> {
+    //     let mut field_bit_position = bit_offset as usize;
+    //     let mut value_bit_position = 0;
+    //     let mut rem = bit_length as usize;
 
-        while rem != 0 {
-            let aligned = field_bit_position as u64 / access_size;
-            let off = field_bit_position % (access_size as usize);
-            let lim = core::cmp::min(access_size as usize - off, rem);
+    //     while rem != 0 {
+    //         let aligned = field_bit_position as u64 / access_size;
+    //         let off = field_bit_position % (access_size as usize);
+    //         let lim = core::cmp::min(access_size as usize - off, rem);
 
-            let address = base_address + aligned;
+    //         let address = base_address + aligned;
 
-            access(self, address, off, value_bit_position, lim)?;
+    //         access(self, address, off, value_bit_position, lim)?;
 
-            rem -= lim;
-            field_bit_position += lim;
-            value_bit_position += lim;
-        }
+    //         rem -= lim;
+    //         field_bit_position += lim;
+    //         value_bit_position += lim;
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// Read from an operation-region, performing only standard-sized reads (supported powers-of-2 only. If a field
     /// is not one of these sizes, it may need to be masked, or multiple reads may need to be performed).
@@ -587,9 +587,10 @@ impl AmlContext {
             }
 
             RegionSpace::EmbeddedControl => {
-                let address = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
-                assert_eq!(length, 8);
-                Ok(self.handler.read_ec_u8(address) as u64)
+                Ok(0)
+                // let address = (region_base + offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
+                // assert_eq!(length, 8);
+                // Ok(self.handler.read_ec_u8(address) as u64)
             }
 
             // TODO
@@ -620,7 +621,7 @@ impl AmlContext {
         };
 
         match region_space {
-            RegionSpace::SystemMemory => self.bit_access_mut(
+            RegionSpace::SystemMemory => self.bit_access(
                 *region_base,
                 bit_offset,
                 access_size,
@@ -657,7 +658,7 @@ impl AmlContext {
                 },
             ),
 
-            RegionSpace::SystemIo => self.bit_access_mut(
+            RegionSpace::SystemIo => self.bit_access(
                 *region_base,
                 bit_offset,
                 access_size,
