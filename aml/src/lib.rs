@@ -61,7 +61,7 @@ pub mod value;
 pub use crate::{namespace::*, value::AmlValue};
 
 use alloc::{boxed::Box, collections::BTreeMap, string::ToString};
-use core::mem;
+use core::{mem, time::Duration};
 use log::{error, warn};
 use misc::{ArgNum, LocalNum};
 use name_object::Target;
@@ -300,6 +300,11 @@ impl AmlContext {
         Ok(())
     }
 
+    pub(crate) fn sleep(&self, milliseconds: u64) -> Result<(), AmlError> {
+        self.handler.sleep(Duration::from_millis(milliseconds));
+        Ok(())
+    }
+
     pub(crate) fn read_target(&self, target: &Target) -> Result<&AmlValue, AmlError> {
         match target {
             Target::Null => todo!(),
@@ -500,7 +505,10 @@ impl AmlContext {
 
                         let data = match access_size {
                             8 => this.handler.read_u8(address) as u64,
-                            _ => todo!(),
+                            16 => this.handler.read_u16(address) as u64,
+                            32 => this.handler.read_u32(address) as u64,
+                            64 => this.handler.read_u64(address),
+                            _ => unimplemented!(),
                         };
 
                         result.set_bits(dst_pos..dst_pos + count, data.get_bits(src_pos..src_pos + count));
@@ -529,7 +537,7 @@ impl AmlContext {
                             8 => this.handler.read_io_u8(address) as u32,
                             16 => this.handler.read_io_u16(address) as u32,
                             32 => this.handler.read_io_u32(address) as u32,
-                            _ => todo!(),
+                            _ => unimplemented!(),
                         };
 
                         result.set_bits(dst_pos..dst_pos + count, data.get_bits(src_pos..src_pos + count));
@@ -862,6 +870,8 @@ pub trait Handler: Send + Sync {
 
     fn write_ec_u8(&self, address: u64, value: u8);
     fn read_ec_u8(&self, address: u64) -> u8;
+
+    fn sleep(&self, duration: Duration);
 
     fn handle_fatal_error(&self, fatal_type: u8, fatal_code: u32, fatal_arg: u64) {
         panic!("Fatal error while executing AML (encountered DefFatal op). fatal_type = {:?}, fatal_code = {:?}, fatal_arg = {:?}", fatal_type, fatal_code, fatal_arg);
