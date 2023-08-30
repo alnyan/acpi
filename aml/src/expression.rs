@@ -47,6 +47,7 @@ where
         "ExpressionOpcode",
         choice!(
             def_add(),
+            def_subtract(),
             def_and(),
             def_buffer(),
             def_concat(),
@@ -94,6 +95,31 @@ where
                     let left = try_with_context!(context, left_arg.as_integer(context));
                     let right = try_with_context!(context, right_arg.as_integer(context));
                     let result = AmlValue::Integer(left.wrapping_add(right));
+
+                    try_with_context!(context, context.store(target, result.clone()));
+                    (Ok(result), context)
+                },
+            ),
+        ))
+        .map(|((), result)| Ok(result))
+}
+
+fn def_subtract<'a, 'c>() -> impl Parser<'a, 'c, AmlValue>
+where
+    'c: 'a,
+{
+    /*
+     * DefSubtract := 0x74 Operand Operand Target
+     */
+    opcode(opcode::DEF_SUBTRACT_OP)
+        .then(comment_scope(
+            DebugVerbosity::AllScopes,
+            "DefSubtract",
+            term_arg().then(term_arg()).then(target()).map_with_context(
+                |((left_arg, right_arg), target), context| {
+                    let left = try_with_context!(context, left_arg.as_integer(context));
+                    let right = try_with_context!(context, right_arg.as_integer(context));
+                    let result = AmlValue::Integer(left.wrapping_sub(right));
 
                     try_with_context!(context, context.store(target, result.clone()));
                     (Ok(result), context)
