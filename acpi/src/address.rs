@@ -102,4 +102,14 @@ impl GenericAddress {
             address: raw.address,
         })
     }
+
+    pub(crate) fn from_pm_register(
+        address_space: AddressSpace,
+        byte_width: u8,
+        address: u64,
+    ) -> Result<GenericAddress, AcpiError> {
+        let bit_width = if byte_width > 31 { unimplemented!() } else { byte_width * 8 };
+
+        Ok(GenericAddress { address_space, bit_width, bit_offset: 0, access_size: AccessSize::Undefined, address })
+    }
 }

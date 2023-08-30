@@ -6,6 +6,15 @@ use crate::{
 };
 use bit_field::BitField;
 
+/// PM1x enable/status register pair addresses obtained from the FADT
+#[derive(Debug)]
+pub struct Pm1Registers {
+    pub x_pm1a_status: GenericAddress,
+    pub x_pm1a_enable: GenericAddress,
+    pub x_pm1b_status: Option<GenericAddress>,
+    pub x_pm1b_enable: Option<GenericAddress>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerProfile {
     Unspecified,
@@ -345,6 +354,38 @@ impl Fadt {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn pm1_registers(&self) -> Result<Pm1Registers, AcpiError> {
+        let pm1a_event_block = self.pm1a_event_block()?;
+        let pm1b_event_block = self.pm1b_event_block()?;
+        let pm1_byte_width = pm1a_event_block.bit_width / 16;
+
+        let x_pm1a_status = GenericAddress::from_pm_register(
+            pm1a_event_block.address_space,
+            pm1_byte_width,
+            pm1a_event_block.address,
+        )?;
+        let x_pm1a_enable = GenericAddress::from_pm_register(
+            pm1a_event_block.address_space,
+            pm1_byte_width,
+            pm1a_event_block.address + pm1_byte_width as u64,
+        )?;
+
+        let (x_pm1b_status, x_pm1b_enable) = if let Some(pm1b) = pm1b_event_block {
+            (
+                Some(GenericAddress::from_pm_register(pm1b.address_space, pm1_byte_width, pm1b.address)?),
+                Some(GenericAddress::from_pm_register(
+                    pm1b.address_space,
+                    pm1_byte_width,
+                    pm1b.address + pm1_byte_width as u64,
+                )?),
+            )
+        } else {
+            (None, None)
+        };
+
+        Ok(Pm1Registers { x_pm1a_status, x_pm1a_enable, x_pm1b_status, x_pm1b_enable })
     }
 }
 
