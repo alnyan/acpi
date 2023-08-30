@@ -68,7 +68,7 @@ use name_object::Target;
 use parser::{Parser, Propagate};
 use pkg_length::PkgLength;
 use term_object::term_list;
-use value::{AmlType, Args};
+use value::{AmlReference, AmlType, Args};
 
 /// AML has a `RevisionOp` operator that returns the "AML interpreter revision". It's not clear
 /// what this is actually used for, but this is ours.

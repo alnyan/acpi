@@ -173,6 +173,13 @@ impl fmt::Debug for MethodCode {
 }
 
 #[derive(Clone, Debug)]
+pub enum AmlReference {
+    Name(AmlHandle),
+    Local(u8),
+    Arg(u8),
+}
+
+#[derive(Clone, Debug)]
 pub enum AmlValue {
     Uninitialized,
     Boolean(bool),
@@ -229,6 +236,7 @@ pub enum AmlValue {
         resource_order: u16,
     },
     ThermalZone,
+    Reference(AmlReference),
 }
 
 impl AmlValue {
@@ -269,6 +277,7 @@ impl AmlValue {
             AmlValue::Package(_) => AmlType::Package,
             AmlValue::PowerResource { .. } => AmlType::PowerResource,
             AmlValue::ThermalZone => AmlType::ThermalZone,
+            AmlValue::Reference(_) => AmlType::ObjReference,
         }
     }
 
@@ -585,9 +594,6 @@ impl AmlValue {
             //  *    - if the desired length is larger than we can read, we need to do multiple reads
             //  */
             // Need to read multiple items
-            if *offset % 8 + *length > field_size {
-                todo!();
-            }
 
             Ok(AmlValue::Integer(
                 context

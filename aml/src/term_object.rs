@@ -19,7 +19,7 @@ use crate::{
     },
     pkg_length::{pkg_length, raw_pkg_length, PkgLength},
     statement::statement_opcode,
-    value::{AmlValue, FieldFlags, MethodCode, MethodFlags, RegionSpace},
+    value::{AmlReference, AmlValue, FieldFlags, MethodCode, MethodFlags, RegionSpace},
     AmlContext,
     AmlError,
     AmlHandle,
@@ -861,11 +861,9 @@ where
             name_string().then(target()).map_with_context(|(source, target), context| {
                 let handle = context.namespace.search(&source, &context.current_scope);
                 let result = AmlValue::Boolean(handle.is_ok());
-                if let Ok((_name, _handle)) = handle {
-                    match target {
-                        Target::Null => { /* just return the result of the check */ }
-                        _ => return (Err(Propagate::Err(AmlError::Unimplemented)), context),
-                    }
+                if let Ok((_, handle)) = handle {
+                    let reference = AmlValue::Reference(AmlReference::Name(handle));
+                    try_with_context!(context, context.store(target, reference));
                 }
                 (Ok(result), context)
             }),
