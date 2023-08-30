@@ -356,6 +356,10 @@ impl Fadt {
         }
     }
 
+    pub fn gpe0_block_length(&self) -> u8 {
+        self.gpe0_block_length
+    }
+
     pub fn pm1_registers(&self) -> Result<Pm1Registers, AcpiError> {
         let pm1a_event_block = self.pm1a_event_block()?;
         let pm1b_event_block = self.pm1b_event_block()?;
