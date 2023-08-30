@@ -562,7 +562,7 @@ impl AmlValue {
                     match region {
                         RegionSpace::SystemMemory => 64,
                         RegionSpace::SystemIo | RegionSpace::PciConfig => 32,
-                        RegionSpace::EmbeddedControl => 8,
+                        RegionSpace::EmbeddedControl => return Ok(AmlValue::Integer(0)),
                         _ => unimplemented!(),
                     }
                 } else {
@@ -631,6 +631,7 @@ impl AmlValue {
                     match region {
                         RegionSpace::SystemMemory => 64,
                         RegionSpace::SystemIo | RegionSpace::PciConfig => 32,
+                        RegionSpace::EmbeddedControl => return Ok(()),
                         _ => unimplemented!(),
                     }
                 } else {
@@ -705,6 +706,11 @@ impl AmlValue {
 
     pub fn write_buffer_field(&mut self, value: AmlValue, context: &mut AmlContext) -> Result<(), AmlError> {
         use bitvec::view::BitView;
+
+        let value = match value {
+            AmlValue::Field { .. } => value.read_field(context)?,
+            e => e,
+        };
 
         if let AmlValue::BufferField { buffer_data, offset, length } = self {
             let offset = *offset as usize;

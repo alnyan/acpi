@@ -586,7 +586,7 @@ impl AmlContext {
                 let function = adr.get_bits(0..8) as u8;
                 let offset = (region_base + bit_offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
 
-                match length {
+                match access_size {
                     8 => Ok(self.handler.read_pci_u8(seg, bbn, device, function, offset) as u64),
                     16 => Ok(self.handler.read_pci_u16(seg, bbn, device, function, offset) as u64),
                     32 => Ok(self.handler.read_pci_u32(seg, bbn, device, function, offset) as u64),
@@ -732,7 +732,7 @@ impl AmlContext {
                 let function = adr.get_bits(0..8) as u8;
                 let offset = (region_base + bit_offset).try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
 
-                match length {
+                match access_size {
                     8 => Ok(self.handler.write_pci_u8(seg, bbn, device, function, offset, value as u8)),
                     16 => Ok(self.handler.write_pci_u16(seg, bbn, device, function, offset, value as u16)),
                     32 => Ok(self.handler.write_pci_u32(seg, bbn, device, function, offset, value as u32)),
