@@ -208,6 +208,14 @@ pub enum AmlValue {
         offset: u64,
         length: u64,
     },
+    BankField {
+        region: AmlHandle,
+        bank_register: AmlHandle,
+        bank_value: u64,
+        flags: FieldFlags,
+        offset: u64,
+        length: u64,
+    },
     Device,
     Method {
         flags: MethodFlags,
@@ -267,7 +275,9 @@ impl AmlValue {
             AmlValue::Integer(_) => AmlType::Integer,
             AmlValue::String(_) => AmlType::String,
             AmlValue::OpRegion { .. } => AmlType::OpRegion,
-            AmlValue::Field { .. } | AmlValue::IndexField { .. } => AmlType::FieldUnit,
+            AmlValue::Field { .. } | AmlValue::IndexField { .. } | AmlValue::BankField { .. } => {
+                AmlType::FieldUnit
+            }
             AmlValue::Device => AmlType::Device,
             AmlValue::Method { .. } => AmlType::Method,
             AmlValue::Buffer(_) => AmlType::Buffer,
@@ -335,6 +345,7 @@ impl AmlValue {
             // TODO: IndexField cannot be accessed through an immutable &AmlContext
             AmlValue::IndexField { .. } => self.read_index_field(context)?.as_integer(context),
             AmlValue::BufferField { .. } => self.read_buffer_field(context)?.as_integer(context),
+            AmlValue::BankField { .. } => self.read_bank_field(context)?.as_integer(context),
 
             _ => Err(AmlError::IncompatibleValueConversion { current: self.type_of(), target: AmlType::Integer }),
         }
@@ -551,6 +562,114 @@ impl AmlValue {
 
             Ok(())
         })
+    }
+
+    pub fn read_bank_field(&self, context: &AmlContext) -> Result<AmlValue, AmlError> {
+        let AmlValue::BankField { region, bank_register, bank_value, flags, offset, length } = self else {
+            return Err(AmlError::IncompatibleValueConversion {
+                current: self.type_of(),
+                target: AmlType::FieldUnit,
+            });
+        };
+
+        let mut bank_register = context.namespace.get(*bank_register)?.clone();
+
+        bank_register.write_field(AmlValue::Integer(*bank_value), context)?;
+
+        let maximum_access_size = {
+            if let AmlValue::OpRegion { region, .. } = context.namespace.get(*region)? {
+                match region {
+                    RegionSpace::SystemMemory => 64,
+                    RegionSpace::SystemIo | RegionSpace::PciConfig => 32,
+                    RegionSpace::EmbeddedControl => return Ok(AmlValue::Integer(0)),
+                    _ => unimplemented!(),
+                }
+            } else {
+                return Err(AmlError::FieldRegionIsNotOpRegion);
+            }
+        };
+        let minimum_access_size = match flags.access_type()? {
+            FieldAccessType::Any => 8,
+            FieldAccessType::Byte => 8,
+            FieldAccessType::Word => 16,
+            FieldAccessType::DWord => 32,
+            FieldAccessType::QWord => 64,
+            FieldAccessType::Buffer => 8, // TODO
+        };
+
+        let field_size = length.next_power_of_two();
+        // /*
+        //  * Find the access size, as either the minimum access size allowed by the region, or the field length
+        //  * rounded up to the next power-of-2, whichever is larger.
+        //  */
+        // let access_size = u64::max(minimum_access_size, length.next_power_of_two());
+
+        // TODO length of 64 or less is assumed
+
+        // /*
+        //  * TODO: we need to decide properly how to read from the region itself. Complications:
+        //  *    - if the region has a minimum access size greater than the desired length, we need to read the
+        //  *      minimum and mask it (reading a byte from a WordAcc region)
+        //  *    - if the desired length is larger than we can read, we need to do multiple reads
+        //  */
+        // Need to read multiple items
+
+        Ok(AmlValue::Integer(
+            context
+                .read_region(*region, *offset, minimum_access_size, field_size)?
+                .get_bits(0..(*length as usize)),
+        ))
+    }
+
+    pub fn write_bank_field(&self, value: AmlValue, context: &AmlContext) -> Result<(), AmlError> {
+        let AmlValue::BankField { region, bank_register, bank_value, flags, offset, length } = self else {
+            return Err(AmlError::IncompatibleValueConversion {
+                current: self.type_of(),
+                target: AmlType::FieldUnit,
+            });
+        };
+
+        let mut field_value = match flags.field_update_rule()? {
+            FieldUpdateRule::Preserve => self.read_bank_field(context)?.as_integer(context)?,
+            FieldUpdateRule::WriteAsOnes => 0xffffffff_ffffffff,
+            FieldUpdateRule::WriteAsZeros => 0x0,
+        };
+
+        let mut bank_register = context.namespace.get(*bank_register)?.clone();
+        let value = value.as_integer(context)?;
+
+        bank_register.write_field(AmlValue::Integer(*bank_value), context)?;
+
+        let maximum_access_size = {
+            if let AmlValue::OpRegion { region, .. } = context.namespace.get(*region)? {
+                match region {
+                    RegionSpace::SystemMemory => 64,
+                    RegionSpace::SystemIo | RegionSpace::PciConfig => 32,
+                    RegionSpace::EmbeddedControl => return Ok(()),
+                    _ => unimplemented!(),
+                }
+            } else {
+                return Err(AmlError::FieldRegionIsNotOpRegion);
+            }
+        };
+        let minimum_access_size = match flags.access_type()? {
+            FieldAccessType::Any => 8,
+            FieldAccessType::Byte => 8,
+            FieldAccessType::Word => 16,
+            FieldAccessType::DWord => 32,
+            FieldAccessType::QWord => 64,
+            FieldAccessType::Buffer => 8, // TODO
+        };
+
+        /*
+         * Find the access size, as either the minimum access size allowed by the region, or the field length
+         * rounded up to the next power-of-2, whichever is larger.
+         */
+        // let access_size = u64::max(minimum_access_size, length.next_power_of_two());
+        let field_size = length.next_power_of_two();
+
+        field_value.set_bits(0..(*length as usize), value);
+        context.write_region(*region, *offset, minimum_access_size, field_size, field_value)
     }
 
     /// Reads from a field of an opregion, returning either a `AmlValue::Integer` or an `AmlValue::Buffer`,

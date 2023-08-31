@@ -41,6 +41,14 @@ fn main() -> std::io::Result<()> {
         .arg(Arg::new("reset").long("reset").action(ArgAction::SetTrue).help("Clear namespace after each file"))
         .arg(Arg::new("path").short('p').long("path").required(false).action(ArgAction::Set).value_name("DIR"))
         .arg(Arg::new("files").action(ArgAction::Append).value_name("FILE.{asl,aml}"))
+        .arg(
+            Arg::new("invoke")
+                .long("invoke")
+                .required(false)
+                .num_args(1)
+                .action(ArgAction::Set)
+                .value_name("CONTROL-METHOD"),
+        )
         .group(ArgGroup::new("files_list").args(["path", "files"]).required(true))
         .get_matches();
 
@@ -162,6 +170,15 @@ fn main() -> std::io::Result<()> {
             }
         }
     });
+
+    if let Some(invoke) = matches.get_one::<String>("invoke") {
+        println!("Invoke {:?}", invoke);
+        let path = aml::AmlName::from_str(invoke.as_str()).unwrap();
+        let args = aml::value::Args::EMPTY;
+
+        let result = context.invoke_method(&path, args).unwrap();
+        println!("Result: {:?}", result);
+    }
 
     println!("Test results: {} passed, {} failed", passed, failed);
     Ok(())
@@ -319,4 +336,6 @@ impl aml::Handler for Handler {
     fn write_ec_u8(&self, address: u64, value: u8) {
         todo!()
     }
+
+    fn sleep(&self, _: core::time::Duration) {}
 }

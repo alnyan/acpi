@@ -111,7 +111,8 @@ where
             def_power_res(),
             def_thermal_zone(),
             def_mutex(),
-            def_index_field()
+            def_index_field(),
+            def_bank_field()
         ),
     )
 }
@@ -946,6 +947,88 @@ where
                             let (new_input, new_context, field_length) = index_field_element(
                                 index_handle,
                                 data_handle,
+                                FieldFlags::new(flags),
+                                current_offset,
+                            )
+                            .parse(input, context)?;
+
+                            input = new_input;
+                            context = new_context;
+                            current_offset += field_length;
+                        }
+
+                        Ok((input, context, ()))
+                    }
+                }),
+        ))
+        .discard_result()
+}
+
+fn bank_field_element<'a, 'c>(
+    region: AmlHandle,
+    bank_register: AmlHandle,
+    bank_value: u64,
+    flags: FieldFlags,
+    offset: u64,
+) -> impl Parser<'a, 'c, u64>
+where
+    'c: 'a,
+{
+    let reserved_field =
+        opcode(opcode::RESERVED_FIELD).then(raw_pkg_length()).map(|((), length)| Ok(length as u64));
+
+    let named_field = name_seg().then(raw_pkg_length()).map_with_context(move |(name_seg, length), context| {
+        try_with_context!(
+            context,
+            context.namespace.add_value_at_resolved_path(
+                AmlName::from_name_seg(name_seg),
+                &context.current_scope,
+                AmlValue::BankField { region, bank_register, bank_value, flags, offset, length: length as u64 }
+            )
+        );
+
+        (Ok(length as u64), context)
+    });
+
+    choice!(reserved_field, named_field)
+}
+
+fn def_bank_field<'a, 'c>() -> impl Parser<'a, 'c, ()>
+where
+    'c: 'a,
+{
+    /*
+     * DefBankField := BankFieldOp PkgLength NameString NameString BankValue FieldFlags FieldList
+     * BankValue := TermArg => Integer
+     * BankFieldOp := ExtOpPrefix 0x87
+     */
+    ext_opcode(opcode::EXT_DEF_BANK_FIELD_OP)
+        .then(comment_scope(
+            DebugVerbosity::Scopes,
+            "DefBankField",
+            pkg_length()
+                .then(name_string())
+                .then(name_string())
+                .then(term_arg())
+                .then(take())
+                .map_with_context(|((((list_length, region_name), bank_name), bank_value), flags), context| {
+                    let (_, region_handle) =
+                        try_with_context!(context, context.namespace.search(&region_name, &context.current_scope));
+                    let (_, bank_register) =
+                        try_with_context!(context, context.namespace.search(&bank_name, &context.current_scope));
+                    let bank_value = try_with_context!(context, bank_value.as_integer(context));
+
+                    (Ok((list_length, region_handle, bank_register, bank_value, flags)), context)
+                })
+                .feed(|(list_length, region_handle, bank_register, bank_value, flags)| {
+                    move |mut input, mut context| {
+                        let mut current_offset = 0;
+
+                        while list_length.still_parsing(input) {
+                            let (new_input, new_context, field_length) = bank_field_element(
+                                region_handle,
+                                bank_register,
+                                bank_value,
                                 FieldFlags::new(flags),
                                 current_offset,
                             )

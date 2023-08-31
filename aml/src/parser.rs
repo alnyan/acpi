@@ -242,7 +242,12 @@ where
 {
     move |input: &'a [u8], context: &'c mut AmlContext| match input.first() {
         Some(&byte) if condition(byte) => Ok((&input[1..], context, byte)),
-        Some(&byte) => Err((input, context, Propagate::Err(AmlError::UnexpectedByte(byte)))),
+        Some(&byte) => {
+            if input.len() > 1 {
+                log::error!("Unexpected bytes: {:#x?}", &input[0..2]);
+            }
+            Err((input, context, Propagate::Err(AmlError::UnexpectedByte(byte))))
+        }
         None => Err((input, context, Propagate::Err(AmlError::UnexpectedEndOfStream))),
     }
 }

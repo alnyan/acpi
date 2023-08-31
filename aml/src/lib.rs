@@ -358,6 +358,10 @@ impl AmlContext {
                                 field.write_index_field(value, self)?;
                                 field.read_index_field(self)
                             }
+                            AmlValue::BankField { .. } => {
+                                field.write_bank_field(value, self)?;
+                                field.read_bank_field(self)
+                            }
                             _ => unreachable!(),
                         }
                     }
@@ -423,7 +427,7 @@ impl AmlContext {
         let mut rem = bit_length as usize;
 
         while rem != 0 {
-            let aligned = field_bit_position as u64 / access_size;
+            let aligned = ((field_bit_position as u64) & !((access_size >> 3) - 1)) / 8;
             let off = field_bit_position % (access_size as usize);
             let lim = core::cmp::min(access_size as usize - off, rem);
 
