@@ -333,7 +333,7 @@ impl AmlValue {
              */
             AmlValue::Field { .. } => self.read_field(context)?.as_integer(context),
             // TODO: IndexField cannot be accessed through an immutable &AmlContext
-            AmlValue::IndexField { .. } => todo!(),
+            AmlValue::IndexField { .. } => self.read_index_field(context)?.as_integer(context),
             AmlValue::BufferField { .. } => self.read_buffer_field(context)?.as_integer(context),
 
             _ => Err(AmlError::IncompatibleValueConversion { current: self.type_of(), target: AmlType::Integer }),

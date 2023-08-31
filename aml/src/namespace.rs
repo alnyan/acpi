@@ -163,13 +163,13 @@ impl Namespace {
         &mut self,
         path: AmlName,
         scope: &AmlName,
-        target: AmlName
+        target: AmlName,
     ) -> Result<AmlHandle, AmlError> {
         let path = path.resolve(scope)?;
         let target = target.resolve(scope)?;
 
         let handle = self.get_handle(&target)?;
-        
+
         let (level, last_seg) = self.get_level_for_path_mut(&path)?;
         match level.values.insert(last_seg, handle) {
             None => Ok(handle),
@@ -187,7 +187,7 @@ impl Namespace {
 
     pub fn get_handle(&self, path: &AmlName) -> Result<AmlHandle, AmlError> {
         let (level, last_seg) = self.get_level_for_path(path)?;
-        Ok(*level.values.get(&last_seg).ok_or(AmlError::ValueDoesNotExist(path.clone()))?)
+        Ok(*level.values.get(&last_seg).ok_or_else(|| AmlError::ValueDoesNotExist(path.clone()))?)
     }
 
     pub fn get_by_path(&self, path: &AmlName) -> Result<&AmlValue, AmlError> {
@@ -240,7 +240,9 @@ impl Namespace {
                 match scope.parent() {
                     Ok(parent) => scope = parent,
                     // If we still haven't found the value and have run out of parents, return `None`.
-                    Err(AmlError::RootHasNoParent) => return Err(AmlError::ValueDoesNotExist(path.clone())),
+                    Err(AmlError::RootHasNoParent) => {
+                        return Err(AmlError::ValueDoesNotExist(path.clone()));
+                    }
                     Err(err) => return Err(err),
                 }
             }
@@ -748,20 +750,20 @@ mod tests {
 
         assert_eq!(namespace.add_level((AmlName::from_str("\\FOO")).unwrap(), LevelType::Scope), Ok(()));
 
-        assert!(
-            namespace.add_value_at_resolved_path(
-            AmlName::from_str("BAR").unwrap(),
-            &AmlName::from_str("\\FOO").unwrap(),
-            AmlValue::Integer(100))
-            .is_ok()
-        );
-        assert!(
-            namespace.add_alias_at_resolved_path(
+        assert!(namespace
+            .add_value_at_resolved_path(
+                AmlName::from_str("BAR").unwrap(),
+                &AmlName::from_str("\\FOO").unwrap(),
+                AmlValue::Integer(100)
+            )
+            .is_ok());
+        assert!(namespace
+            .add_alias_at_resolved_path(
                 AmlName::from_str("BARA").unwrap(),
                 &AmlName::from_str("\\FOO").unwrap(),
-                AmlName::from_str("BAR").unwrap())
-                .is_ok()
-        );
+                AmlName::from_str("BAR").unwrap()
+            )
+            .is_ok());
         assert!(namespace.get_by_path(&AmlName::from_str("\\FOO.BARA").unwrap()).is_ok());
         assert_eq!(
             namespace.get_handle(&AmlName::from_str("\\FOO.BARA").unwrap()),
