@@ -1,10 +1,13 @@
 use crate::{
+    expression::{def_deref_of, def_index},
     misc::{arg_obj, debug_obj, local_obj, ArgNum, LocalNum},
     namespace::{AmlName, NameComponent},
     opcode::{opcode, DUAL_NAME_PREFIX, MULTI_NAME_PREFIX, NULL_NAME, PREFIX_CHAR, ROOT_CHAR},
     parser::{choice, comment_scope, consume, n_of, take, take_while, Parser, Propagate},
+    value::{AmlIndexReference, AmlReference},
     AmlContext,
     AmlError,
+    AmlValue,
     DebugVerbosity,
 };
 use alloc::vec::Vec;
@@ -18,6 +21,8 @@ pub enum Target {
     Debug,
     Arg(ArgNum),
     Local(LocalNum),
+    IndexReference(AmlIndexReference, u64),
+    Reference(AmlReference),
 }
 
 pub fn target<'a, 'c>() -> impl Parser<'a, 'c, Target>
@@ -40,13 +45,21 @@ where
     'c: 'a,
 {
     /*
-     * SuperName := SimpleName | DebugObj | ReferenceTypeOpcode
-     * TODO: this doesn't cover ReferenceTypeOpcode yet
+     * SuperName := SimpleName | DebugObj | Type6Opcode
+     * Type6Opcode := DefRefOf | DefDerefOf | DefIndex | UserTermObj
      */
     comment_scope(
         DebugVerbosity::AllScopes,
         "SuperName",
-        choice!(debug_obj().map(|()| Ok(Target::Debug)), simple_name()),
+        choice!(
+            debug_obj().map(|()| Ok(Target::Debug)),
+            def_index().map(|value| match value {
+                AmlValue::IndexReference(reference, index) => Ok(Target::IndexReference(reference, index)),
+                AmlValue::Reference(reference) => Ok(Target::Reference(reference)),
+                _ => unimplemented!(),
+            }),
+            simple_name()
+        ),
     )
 }
 

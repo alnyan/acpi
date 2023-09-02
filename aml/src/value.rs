@@ -180,6 +180,13 @@ pub enum AmlReference {
 }
 
 #[derive(Clone, Debug)]
+pub enum AmlIndexReference {
+    Buffer(Arc<Spinlock<Vec<u8>>>),
+    Package(Arc<Spinlock<Vec<AmlValue>>>),
+    // TODO String
+}
+
+#[derive(Clone, Debug)]
 pub enum AmlValue {
     Uninitialized,
     Boolean(bool),
@@ -237,14 +244,81 @@ pub enum AmlValue {
     Mutex {
         sync_level: u8,
     },
-    // TODO: I think this will need to be `Arc`ed as well, as `Index` can be used on both Buffers and Packages
-    Package(Vec<AmlValue>),
+    Package(Arc<Spinlock<Vec<AmlValue>>>),
     PowerResource {
         system_level: u8,
         resource_order: u16,
     },
     ThermalZone,
     Reference(AmlReference),
+    IndexReference(AmlIndexReference, u64),
+}
+
+impl AmlIndexReference {
+    pub(crate) fn store(&self, index: u64, value: AmlValue, context: &AmlContext) -> Result<AmlValue, AmlError> {
+        use core::convert::TryInto;
+
+        let index: usize = index.try_into().unwrap();
+
+        match self {
+            AmlIndexReference::Buffer(data) => {
+                let mut data = data.lock();
+                let value = value.as_integer(context)?;
+                let item = data.get_mut(index).ok_or_else(|| todo!())?;
+                *item = value as u8;
+                Ok(AmlValue::Integer(*item as u64))
+            }
+            AmlIndexReference::Package(data) => {
+                let mut data = data.lock();
+                let item = data.get_mut(index).ok_or_else(|| todo!())?;
+                *item = value;
+                Ok(item.clone())
+            }
+        }
+    }
+
+    pub(crate) fn load(&self, index: u64) -> Result<AmlValue, AmlError> {
+        use core::convert::TryInto;
+
+        let index: usize = index.try_into().unwrap();
+
+        match self {
+            AmlIndexReference::Buffer(data) => {
+                data.lock().get(index).map(|byte| AmlValue::Integer(*byte as u64)).ok_or_else(|| todo!())
+            }
+            AmlIndexReference::Package(data) => data.lock().get(index).ok_or_else(|| todo!()).cloned(),
+        }
+    }
+}
+
+impl AmlReference {
+    pub(crate) fn store(
+        &self,
+        index: u64,
+        value: AmlValue,
+        context: &mut AmlContext,
+    ) -> Result<AmlValue, AmlError> {
+        match self {
+            &AmlReference::Arg(_index) => todo!(),
+            &AmlReference::Local(_index) => todo!(),
+            &AmlReference::Name(handle) => {
+                let target = context.namespace.get_mut(handle)?;
+                *target = value;
+                Ok(target.clone())
+            }
+        }
+    }
+
+    pub(crate) fn load(&self, context: &AmlContext) -> Result<AmlValue, AmlError> {
+        match self {
+            &AmlReference::Arg(_index) => todo!(),
+            &AmlReference::Local(_index) => todo!(),
+            &AmlReference::Name(handle) => {
+                let value = context.namespace.get(handle)?;
+                Ok(value.clone())
+            }
+        }
+    }
 }
 
 impl AmlValue {
@@ -288,6 +362,16 @@ impl AmlValue {
             AmlValue::PowerResource { .. } => AmlType::PowerResource,
             AmlValue::ThermalZone => AmlType::ThermalZone,
             AmlValue::Reference(_) => AmlType::ObjReference,
+            AmlValue::IndexReference(_, _) => AmlType::ObjReference,
+        }
+    }
+
+    pub fn deref_of(&self, context: &mut AmlContext) -> Result<AmlValue, AmlError> {
+        match self {
+            AmlValue::IndexReference(reference, index) => reference.load(*index),
+            AmlValue::Reference(reference) => reference.load(context),
+            AmlValue::String(_) => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -299,7 +383,7 @@ impl AmlValue {
             // For a string, returns the size in bytes (without NULL)
             AmlValue::String(value) => Ok(value.len() as u64),
             // For a package, returns the number of elements
-            AmlValue::Package(value) => Ok(value.len() as u64),
+            AmlValue::Package(value) => Ok(value.lock().len() as u64),
             // TODO: For an Object Reference, the size of the object is returned
             // Other data types cause a fatal run-time error
             _ => Err(AmlError::InvalidSizeOfApplication(self.type_of())),
@@ -504,6 +588,7 @@ impl AmlValue {
     /// Reads from an IndexField, returning either an `Integer`
     pub fn read_index_field(&self, context: &AmlContext) -> Result<AmlValue, AmlError> {
         let AmlValue::IndexField { index, data, flags, offset, length } = self else {
+            log::info!("Attempt to read something that isn't an IndexField");
             return Err(AmlError::IncompatibleValueConversion {
                 current: self.type_of(),
                 target: AmlType::FieldUnit,
@@ -535,6 +620,7 @@ impl AmlValue {
 
     pub fn write_index_field(&self, value: AmlValue, context: &AmlContext) -> Result<(), AmlError> {
         let AmlValue::IndexField { index, data, flags, offset, length } = self else {
+            log::info!("Attempt to write something that isn't an IndexField");
             return Err(AmlError::IncompatibleValueConversion {
                 current: self.type_of(),
                 target: AmlType::FieldUnit,
@@ -566,6 +652,7 @@ impl AmlValue {
 
     pub fn read_bank_field(&self, context: &AmlContext) -> Result<AmlValue, AmlError> {
         let AmlValue::BankField { region, bank_register, bank_value, flags, offset, length } = self else {
+            log::info!("Attempt to read something that isn't a BankField");
             return Err(AmlError::IncompatibleValueConversion {
                 current: self.type_of(),
                 target: AmlType::FieldUnit,
@@ -623,6 +710,7 @@ impl AmlValue {
 
     pub fn write_bank_field(&self, value: AmlValue, context: &AmlContext) -> Result<(), AmlError> {
         let AmlValue::BankField { region, bank_register, bank_value, flags, offset, length } = self else {
+            log::info!("Attempt to write something that isn't a BankField");
             return Err(AmlError::IncompatibleValueConversion {
                 current: self.type_of(),
                 target: AmlType::FieldUnit,
@@ -674,6 +762,7 @@ impl AmlValue {
 
     /// Reads from a field of an opregion, returning either a `AmlValue::Integer` or an `AmlValue::Buffer`,
     /// depending on the size of the field.
+    #[track_caller]
     pub fn read_field(&self, context: &AmlContext) -> Result<AmlValue, AmlError> {
         if let AmlValue::Field { region, flags, offset, length } = self {
             let maximum_access_size = {
@@ -720,6 +809,20 @@ impl AmlValue {
                     .get_bits(0..(*length as usize)),
             ))
         } else {
+            log::info!("Attempt to read something that isn't a Field");
+            log::info!("{:#?}", core::panic::Location::caller());
+            match self {
+                AmlValue::IndexField { .. } => {
+                    log::info!("Actually an IndexField");
+                }
+                AmlValue::BankField { .. } => {
+                    log::info!("Actually a BankField");
+                }
+                AmlValue::BufferField { .. } => {
+                    log::info!("Actually a BufferField");
+                }
+                _ => (),
+            }
             Err(AmlError::IncompatibleValueConversion { current: self.type_of(), target: AmlType::FieldUnit })
         }
     }
@@ -733,6 +836,7 @@ impl AmlValue {
         let field_update_rule = if let AmlValue::Field { region, flags, offset, length } = self {
             flags.field_update_rule()?
         } else {
+            log::info!("Attempt to write something that isn't a Field");
             return Err(AmlError::IncompatibleValueConversion {
                 current: self.type_of(),
                 target: AmlType::FieldUnit,
@@ -888,8 +992,12 @@ impl AmlValue {
     ///      identical, the lengths are compared. Luckily, the Rust standard library implements lexicographic
     ///      comparison of strings and `[u8]` for us already.
     pub fn cmp(&self, other: AmlValue, context: &mut AmlContext) -> Result<cmp::Ordering, AmlError> {
-        let self_inner =
-            if self.type_of() == AmlType::FieldUnit { self.read_field(context)? } else { self.clone() };
+        let self_inner = match self {
+            AmlValue::Field { .. } => self.read_field(context)?,
+            AmlValue::IndexField { .. } => self.read_index_field(context)?,
+            AmlValue::BankField { .. } => self.read_bank_field(context)?,
+            _ => self.clone(),
+        };
 
         match self_inner.type_of() {
             AmlType::Integer => Ok(self.as_integer(context)?.cmp(&other.as_integer(context)?)),

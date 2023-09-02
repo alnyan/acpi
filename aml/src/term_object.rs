@@ -96,6 +96,8 @@ where
         DebugVerbosity::AllScopes,
         "NamedObj",
         choice!(
+            def_zero_op(),
+            def_one_op(),
             def_create_bit_field(),
             def_create_byte_field(),
             def_create_word_field(),
@@ -115,6 +117,20 @@ where
             def_bank_field()
         ),
     )
+}
+
+fn def_zero_op<'a, 'c>() -> impl Parser<'a, 'c, ()>
+where
+    'c: 'a,
+{
+    opcode(opcode::ZERO_OP).discard_result()
+}
+
+fn def_one_op<'a, 'c>() -> impl Parser<'a, 'c, ()>
+where
+    'c: 'a,
+{
+    opcode(opcode::ONE_OP).discard_result()
 }
 
 pub fn def_name<'a, 'c>() -> impl Parser<'a, 'c, ()>

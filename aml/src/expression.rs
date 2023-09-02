@@ -15,7 +15,7 @@ use crate::{
     },
     pkg_length::pkg_length,
     term_object::{data_ref_object, def_cond_ref_of, term_arg},
-    value::{AmlType, AmlValue, Args},
+    value::{AmlIndexReference, AmlType, AmlValue, Args},
     AmlError,
     DebugVerbosity,
 };
@@ -26,6 +26,7 @@ use alloc::{
     vec::Vec,
 };
 use core::{cmp::Ordering, convert::TryInto, mem, ops::Deref};
+use spinning_top::Spinlock;
 
 pub fn expression_opcode<'a, 'c>() -> impl Parser<'a, 'c, AmlValue>
 where
@@ -74,6 +75,8 @@ where
             def_cond_ref_of(),
             def_size_of(),
             def_acquire(),
+            def_deref_of(),
+            def_index(),
             method_invocation() // XXX: this must always appear last. See how we have to parse it to see why.
         ),
     )
@@ -718,7 +721,7 @@ where
 
                     package_contents.resize(num_elements as usize, AmlValue::Uninitialized);
 
-                    Ok((input, context, AmlValue::Package(package_contents)))
+                    Ok((input, context, AmlValue::Package(Arc::new(Spinlock::new(package_contents)))))
                 }
             }),
         ))
@@ -886,6 +889,56 @@ where
             let success = try_with_context!(context, context.acquire_mutex(mutex, timeout));
             (Ok(AmlValue::Boolean(success)), context)
         })
+}
+
+pub fn def_index<'a, 'c>() -> impl Parser<'a, 'c, AmlValue>
+where
+    'c: 'a,
+{
+    /*
+     * DefIndex := 0x88 BuffPkgStrObj IndexValue Target
+     * BuffPkgStrObj := TermArg => Buffer | Package | String
+     * IndexValue := TermArg => Integer
+     */
+
+    opcode(opcode::DEF_INDEX_OP)
+        .then(comment_scope(
+            DebugVerbosity::AllScopes,
+            "DefIndex",
+            term_arg().then(term_arg()).then(target()).map_with_context(|((object, index), target), context| {
+                let index = try_with_context!(context, index.as_integer(context));
+
+                let index_reference = match object {
+                    AmlValue::String(_) => todo!(),
+                    AmlValue::Buffer(data) => AmlIndexReference::Buffer(data.clone()),
+                    AmlValue::Package(data) => AmlIndexReference::Package(data.clone()),
+                    _ => unimplemented!(),
+                };
+
+                (Ok(AmlValue::IndexReference(index_reference, index)), context)
+            }),
+        ))
+        .map(|((), value)| Ok(value))
+}
+
+pub fn def_deref_of<'a, 'c>() -> impl Parser<'a, 'c, AmlValue>
+where
+    'c: 'a,
+{
+    /*
+     * DefDerefOf := 0x83 ObjReference
+     * ObjReference := TermArg => ObjectReference | String
+     */
+    opcode(opcode::DEF_DEREF_OP)
+        .then(comment_scope(
+            DebugVerbosity::AllScopes,
+            "DerefOf",
+            term_arg().map_with_context(|reference, context| {
+                let value = try_with_context!(context, reference.deref_of(context));
+                (Ok(value), context)
+            }),
+        ))
+        .map(|((), result)| Ok(result))
 }
 
 fn method_invocation<'a, 'c>() -> impl Parser<'a, 'c, AmlValue>

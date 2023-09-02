@@ -315,6 +315,8 @@ impl AmlContext {
             Target::Debug => todo!(),
             Target::Arg(arg) => self.current_arg(*arg),
             Target::Local(local) => self.local(*local),
+            Target::Reference(reference) => todo!(),
+            Target::IndexReference(reference, index) => todo!(),
         }
     }
 
@@ -409,6 +411,9 @@ impl AmlContext {
                 self.method_context.as_mut().unwrap().locals[local_num as usize] = Some(value.clone());
                 Ok(value)
             }
+
+            Target::Reference(reference) => todo!(),
+            Target::IndexReference(reference, index) => reference.store(index, value, self),
 
             Target::Null => Ok(value),
         }
@@ -677,15 +682,6 @@ impl AmlContext {
                 length,
                 |this, address, dst_pos, src_pos, count| {
                     let address = address.try_into().map_err(|_| AmlError::FieldInvalidAddress)?;
-                    if count as u64 != access_size || dst_pos != 0 {
-                        /*
-                         * NOTE: reading from an I/O port is not the same as writing to it, so I
-                         *       don't think it is a good choice to read-modify-write these,
-                         *       instead just signal an error.
-                         */
-                        return Err(AmlError::MisalignedIoAccess { address, access_size });
-                    }
-
                     let bits = value.get_bits(src_pos..src_pos + count);
 
                     match access_size {

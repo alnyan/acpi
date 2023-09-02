@@ -63,8 +63,9 @@ impl PciRoutingTable {
 
         let prt = context.invoke_method(&prt_path, Args::default())?;
         if let AmlValue::Package(ref inner_values) = prt {
-            for value in inner_values {
+            for value in inner_values.lock().iter() {
                 if let AmlValue::Package(ref pin_package) = value {
+                    let pin_package = pin_package.lock();
                     /*
                      * Each inner package has the following structure:
                      *   | Field      | Type      | Description                                               |
